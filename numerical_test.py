@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+#torch.multiprocessing.set_sharing_strategy('file_system')
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 num_batches= 10
 num_train_batches=20
@@ -18,10 +20,9 @@ norm_factor = 1 # 255
 transform = transforms.Compose([transforms.ToTensor()])#, transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5))])
 
 
-trainset = torchvision.datasets.MNIST(root='./data', train=True,
-                                        download=True, transform=transform)
+trainset = torchvision.datasets.MNIST(root='./data', download=True, transform=transform)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                          shuffle=True, num_workers=1)
+                                          shuffle=True, num_workers=0)
 
 # get some random training images
 trainset = list(iter(trainloader))
@@ -31,7 +32,7 @@ for i,(img, label) in enumerate(trainset):
 testset = torchvision.datasets.MNIST(root='./data', train=False,
                                        download=True, transform=transform)
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                         shuffle=False, num_workers=1)
+                                         shuffle=False, num_workers=0)
 
 testset = list(iter(testloader))
 for i,(img, label) in enumerate(testset):
@@ -52,7 +53,7 @@ def onehot(x):
       z[i,x[i]] = 1
     return z.float().to(DEVICE)
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ### functions ###
 def set_tensor(xs):
@@ -68,7 +69,7 @@ def tanh_deriv(xs):
     return 1.0 - torch.tanh(xs) ** 2.0
 
 def linear_deriv(x):
-    return set_tensor(torch.ones_like((x)))
+    return set_tensor(torch.ones_like(x))
 
 def relu(xs):
   return torch.clamp(xs,min=0)
@@ -114,10 +115,10 @@ def get_printer(msg):
     return printer
 
 def numerical_test(lr,n_iters=100):
-    w1 = nn.Parameter(torch.empty((784,300)).normal_(mean=0, std=0.05))
-    w2 = nn.Parameter(torch.empty((300,100)).normal_(mean=0, std=0.05))
-    w3 = nn.Parameter(torch.empty((100,100)).normal_(mean=0, std=0.05))
-    w4 = nn.Parameter(torch.empty((100,10)).normal_(mean=0, std=0.05))
+    w1 = nn.Parameter(torch.empty((784,300)).normal_(std=0.05))
+    w2 = nn.Parameter(torch.empty((300,100)).normal_(std=0.05))
+    w3 = nn.Parameter(torch.empty((100,100)).normal_(std=0.05))
+    w4 = nn.Parameter(torch.empty((100,10)).normal_(std=0.05))
     images, labels = trainset[0] 
     img = nn.Parameter(images)
     labels = onehot(labels)
@@ -217,7 +218,7 @@ def numerical_test(lr,n_iters=100):
 
 
 def plot_numerical_divergence(errors,i):
-    fig,ax = plt.subplots(1,1,figsize=(9,7))
+    fig,ax = plt.subplots(figsize=(9, 7))
     plt.title("Divergence from True Gradient",fontsize=20,fontweight="bold",pad=25)
     ax.plot(errors)
     plt.xlabel("Iteration",fontsize=20,style="oblique",labelpad=10)
@@ -237,7 +238,7 @@ def plot_numerical_divergence(errors,i):
     plt.show()
 
 def plot_numerical_divergence_layers(errors):
-    fig,ax = plt.subplots(1,1,figsize=(9,7))
+    fig,ax = plt.subplots(figsize=(9, 7))
     plt.title("Layerwise Divergences from True Gradient",fontsize=20,fontweight="bold",pad=25)
     for (i,es) in enumerate(errors):
         ax.plot(es,label="Layer " + str(i+1))
@@ -260,7 +261,7 @@ def plot_numerical_divergence_layers(errors):
 
 
 def plot_learning_rate_comparison(errors_list, lrs,i,log_scale=False):
-    fig,ax = plt.subplots(1,1,figsize=(9,7))
+    fig,ax = plt.subplots(figsize=(9, 7))
     plt.title("Learning Rate Comparison Layer " + str(i),fontsize=20,fontweight="bold",pad=25)
     for (ey0,lr) in zip(errors_list,lrs):
         labelstr = "Learning Rate " + str(lr)
@@ -300,7 +301,7 @@ def learning_rate_comparison(lrs,num_iterations=100):
 if __name__ == '__main__':
     #baseline result
     base_lr = 0.1
-    e3s,e2s,e1s = numerical_test(base_lr,100)
+    e3s,e2s,e1s = numerical_test(base_lr)
     #plot_numerical_divergence(e3s,3)
     #plot_numerical_divergence(e2s,2)
     #plot_numerical_divergence(e1s,1)

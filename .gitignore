@@ -1,0 +1,6 @@
+*.log
+.idea/
+data
+figures
+logs
+savedir
