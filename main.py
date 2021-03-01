@@ -1,20 +1,16 @@
 # Preliminary prototype work with activation relaxation on MNIST.
 
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-import torchvision
-import torchvision.transforms as transforms
+import argparse
+import subprocess
 from copy import deepcopy
+from datetime import datetime
+
+import numpy as np
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import os
-import subprocess
-import time
-from datetime import datetime
-import argparse
-import scipy
+import torchvision
+import torchvision.transforms as transforms
 
 
 def get_dataset(batch_size, norm_factor, dataset="mnist"):
@@ -24,15 +20,11 @@ def get_dataset(batch_size, norm_factor, dataset="mnist"):
     if dataset == "mnist":
         trainset = torchvision.datasets.MNIST(root='data', download=True, transform=transform)
         print("trainset: ", trainset)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                                  shuffle=True)
-        print("trainloader: ", trainloader)
-        trainset = list(iter(trainloader))
 
-        testset = torchvision.datasets.MNIST(root='data', train=False,
-                                             download=True, transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                                 shuffle=True)
+        trainset = list(iter(torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)))
+
+        testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform)
+        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=True)
         testset = list(iter(testloader))
         for i, (img, label) in enumerate(trainset):
             trainset[i] = (img.reshape(len(img), 784) / norm_factor, label)
@@ -42,15 +34,11 @@ def get_dataset(batch_size, norm_factor, dataset="mnist"):
     elif dataset == "svhn":
         trainset = torchvision.datasets.SVHN(root='./svhn_data', transform=transform)
         print("trainset: ", trainset)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                                  shuffle=True)
-        print("trainloader: ", trainloader)
-        trainset = list(iter(trainloader))
+
+        trainset = list(iter(torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)))
 
         testset = torchvision.datasets.SVHN(root='./svhn_data', split='test', transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                                 shuffle=True)
-        testset = list(iter(testloader))
+        testset = list(iter(torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=True)))
         for i, (img, label) in enumerate(trainset):
             trainset[i] = (img.reshape(len(img), 3 * 32 * 32) / norm_factor, label)
         for i, (img, label) in enumerate(testset):
@@ -58,17 +46,12 @@ def get_dataset(batch_size, norm_factor, dataset="mnist"):
         return trainset, testset
     elif dataset == "fashion":
         trainset = torchvision.datasets.FashionMNIST(root='./fashion_data', transform=transform)
-        print("trainset: ", trainset)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                                  shuffle=False)
-        print("trainloader: ", trainloader)
-        trainset = list(iter(trainloader))
 
-        testset = torchvision.datasets.FashionMNIST(root='./fashion_data', train=False,
-                                                    download=True, transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                                 shuffle=True)
-        testset = list(iter(testloader))
+        print("trainset: ", trainset)
+        trainset = list(iter(torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=False)))
+
+        testset = torchvision.datasets.FashionMNIST(root='./fashion_data', train=False,download=True, transform=transform)
+        testset = list(iter(torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=True)))
         for i, (img, label) in enumerate(trainset):
             trainset[i] = (img.reshape(len(img), 784) / norm_factor, label)
         for i, (img, label) in enumerate(testset):
@@ -81,32 +64,20 @@ def get_dataset(batch_size, norm_factor, dataset="mnist"):
 def np_norm(x):
     return np.linalg.norm(x.numpy())
 
-
 def onehot(x):
     l: int = len(x)
     z = torch.zeros([l, 10])
-    for i in range(l):
-        z[i, x[i]] = 1
+    for i in range(l): z[i, x[i]] = 1
     return z.float().to(DEVICE)
 
-
 ### functions ###
-def set_tensor(xs):
-    return xs.float().to(DEVICE)
+def set_tensor(xs):    return xs.float().to(DEVICE)
 
 
-def tanh(xs):
-    return torch.tanh(xs)
+def tanh(xs): return torch.tanh(xs)
+def tanh_deriv(xs): return 1.0 - torch.tanh(xs) ** 2.0
 
-
-def linear(x):
-    return x
-
-
-def tanh_deriv(xs):
-    return 1.0 - torch.tanh(xs) ** 2.0
-
-
+def linear(x):    return x
 def linear_deriv(x):
     return set_tensor(torch.ones_like(x))
     # TODO may be faster if allowed to modify x
@@ -114,9 +85,7 @@ def linear_deriv(x):
     # set_tensor(x)
 
 
-def relu(xs):
-    return torch.clamp(xs, min=0)
-
+def relu(xs): return torch.clamp(xs, min=0)
 
 def relu_deriv(xs):
     rel = relu(xs)
@@ -126,55 +95,22 @@ def relu_deriv(xs):
 
 def softmax(xs): return F.softmax(xs)
 
-
 def sigmoid(xs): return F.sigmoid(xs)
 
 def sigmoid_deriv(x):
     sx = F.sigmoid(x)
     return sx * (torch.ones_like(x) - sx)
 
-def accuracy(x: torch.Tensor, y: torch.Tensor): return (1.0 / (1 + torch.dist(x,y))).tolist()
-
-def accuracy0(out, L):
-    B: int = out.shape[0]
-    total: int = 0
-    if len(L.shape) == 1:
-        # i.e. not onehotted
-        # L = onehot(L)
-        for i in range(B):
-            if torch.argmax(out[i, :]) == L: total += 1
-    else:
-        for i in range(B):
-            if torch.argmax(out[i, :]) == torch.argmax(L[i, :]): total += 1
-
-    return total / B
-
-
-### loss functions
-def mse_loss(out, label):
-    return torch.sum((out - label) ** 2)
-
-
-def mse_deriv(out, label):
-    return 2 * (out - label)
-
+def mse_loss(out, label): return torch.sum((out - label) ** 2)
+def mse_deriv(out, label): return 2 * (out - label)
 
 ce_loss = nn.CrossEntropyLoss()
+def cross_entropy_loss(out, label): return ce_loss(out, label)
+def cross_entropy_deriv(out, label): return out - label
 
+def my_cross_entropy(out, label): return -torch.sum(label * torch.log(out + 1e-6))
 
-def cross_entropy_loss(out, label):
-    return ce_loss(out, label)
-
-
-def my_cross_entropy(out, label):
-    return -torch.sum(label * torch.log(out + 1e-6))
-
-
-def cross_entropy_deriv(out, label):
-    return out - label
-
-
-def parse_loss_function(loss_arg):
+def loss(loss_arg):
     if loss_arg == "mse":
         return mse_loss, mse_deriv
     elif loss_arg == "crossentropy":
@@ -203,17 +139,20 @@ class FCLayer(object):
         self.numerical_test = numerical_test
         self.bias = torch.zeros((batch_size, output_size)).float().to(self.device)
         self.x = self.x0 = None
+        self.act = None
+        self.dAct = None
+        self.backwards_weights = None
+        self.y = None
         if self.numerical_test:
             self.weights = nn.Parameter(self.weights)
             self.bias = nn.Parameter(self.bias)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         self.x = x.clone()
-        self.x0 = x #self.x.clone()
-        self.activations = x @ self.weights
-        self.outs = self.fn(self.activations + self.bias)
-        return self.outs
-
+        self.x0 = x   #self.x.clone()  #clone necessary?
+        self.act = x @ self.weights
+        self.y = self.fn(self.act + self.bias)
+        return self.y
 
     def set_weight_parameter(self):
         self.weights = nn.Parameter(self.weights)
@@ -224,34 +163,34 @@ class FCLayer(object):
         self.bias = self.bias.detach()
 
     def init_backwards_weights(self):
-        self.backwards_weights = torch.empty((self.output_size, self.input_size)).normal_(0.0, 0.05).float().to(
-            self.device)
+        self.backwards_weights = torch.empty((self.output_size, self.input_size)).normal_(0.0, 0.05).float().to(self.device)
 
-    def backward(self, xnext):
-        x = self.x
-        if not self.use_backwards_weights:
-            W = self.weights.T
-            if self.use_backward_nonlinearity:
-                xgrad = x - ((xnext * self.activationDeriv()) @ W)
-            else:
-                xgrad = x - (xnext @ W)
+    def backward(self, xx):
+
+        self.dAct = self.fn_deriv(self.act)
+
+        if self.use_backward_nonlinearity:
+            y = xx * self.dAct
         else:
-            B = self.backwards_weights
-            if self.use_backward_nonlinearity:
-                xgrad = x - ((xnext * self.activationDeriv()) @ B)
-            else:
-                xgrad = x - (xnext @ B)
-        x -= self.inference_lr * xgrad
+            y = xx
+
+        W = self.backwards_weights if self.use_backwards_weights else self.weights.T
+
+        x = self.x
+        x -= self.inference_lr * (x - (y @ W))
+
         return x
 
     def activationDeriv(self):
-        return self.fn_deriv(self.activations)
+        return self.fn_deriv(self.act)
 
-    def update_weights(self, xnext, update_weights=True):
-        actDeriv = self.activationDeriv()
+    def update_weights(self, xx, update_weights=True):
+        actDeriv = self.dAct
+        self.dAct = None #acquire
 
-        wgrad = self.x0.T @ (xnext * actDeriv)
-        biasgrad = xnext * actDeriv
+        wgrad = self.x0.T @ (xx * actDeriv)
+        biasgrad = xx * actDeriv
+
         if self.use_backwards_weights and self.update_backwards_weights:
             bwgrad = wgrad.clone().T
         else:
@@ -262,6 +201,7 @@ class FCLayer(object):
             print(wgrad[0:10, 0])
             print("bias grad: ", biasgrad.shape)
             print(biasgrad[0:10, 0])
+
         if update_weights:
             wlr = self.weight_lr
             self.weights -= wlr * wgrad
@@ -269,6 +209,7 @@ class FCLayer(object):
 
             if self.use_backwards_weights and self.update_backwards_weights:
                 self.backwards_weights -= wlr * bwgrad
+
         return wgrad
 
 
@@ -288,27 +229,25 @@ class Net(object):
         self.device = device
         self.update_layer_params()
         # check that the correct things are getting called
-        subprocess.call(["echo", "Params checking: " + str(self.use_backwards_weights) + " " + str(
-            self.use_backward_nonlinearity) + " " + str(self.update_backwards_weights)])
+        # subprocess.call(["echo", "Params checking: " + str(self.use_backwards_weights) + " " + str(
+        #    self.use_backward_nonlinearity) + " " + str(self.update_backwards_weights)])
 
     def forward(self, inp):
-        xs = [[] for _ in range(len(self.layers) + 1)]
+        L = len(self.layers)
+        xs = [[] for _ in range(L + 1)]
         xs[0] = inp
         for i, l in enumerate(self.layers):
             xs[i + 1] = l.forward(xs[i])
-        return xs[-1]
+        return xs[L]
 
     def set_net_params(self):
-        for l in self.layers:
-            l.set_weight_parameter()
+        for l in self.layers: l.set_weight_parameter()
 
     def detach_net_params(self):
-        for l in self.layers:
-            l.detach_weight_parameter()
+        for l in self.layers: l.detach_weight_parameter()
 
     def unset_numerical_test(self):
-        for l in self.layers:
-            l.numerical_test = False
+        for l in self.layers: l.numerical_test = False
 
     def update_layer_params(self):
         for l in self.layers:
@@ -335,28 +274,28 @@ class Net(object):
         self.put(inp, label, self.n_inference_steps, update_weights=False)
 
     """ train, learn """
+
     def put(self, inps, labels, num_inference_steps, update_weights=True):
         # print("learn batch update weights: ", update_weights)
-        N = len(self.layers)
-        fwd = [[] for _ in range(N + 1)]
-        wgrads = []
+        L = len(self.layers)
 
         # forward pass
+        fwd = [[] for _ in range(L + 1)]
         fwd[0] = inps
         for i, l in enumerate(self.layers):
             fwd[i + 1] = l.forward(fwd[i])
 
-        err = self.loss_fn_deriv(fwd[-1], labels)
-        rev = [[] for _ in range(N + 1)]
-        rev[-1] = err
+        err = self.loss_fn_deriv(fwd[L], labels)
 
+        rev = [[] for _ in range(L + 1)]
+        rev[L] = err
         for n in range(num_inference_steps):
             # backward inference
-            for j in reversed(range(N)):
+            for j in reversed(range(L)):
                 rev[j] = self.layers[j].backward(rev[j + 1])
+
         # weight updates
-
-
+        wgrads = []
         for i, l in enumerate(self.layers):
             wgrad = l.update_weights(rev[i + 1], update_weights=update_weights)
             if self.store_gradient_angle:
@@ -406,42 +345,46 @@ class Net(object):
         return mean_angle / len(self.layers)
 
     def train(self, trainset, epochs):
+        return self.trainAR(epochs, trainset)
+
+    def trainAR(self, epochs, trainset):
         self.unset_numerical_test()
         losses = []
-        #accs = []
-        #test_accs = []
+        # accs = []
+        # test_accs = []
         gradient_angles = []
-        #mean_test_accs = []
-        #mean_train_accs = []
+        # mean_test_accs = []
+        # mean_train_accs = []
         # begin training loop
-        device = self.device
-
+        #device = self.device
         for n_epoch in range(epochs):
             print("epoch ", n_epoch)
             for n, (x, y) in enumerate(trainset):
-                with torch.no_grad():
-                    x = x.to(device)
+                #with torch.no_grad():
 
-                    if self.loss_fn != cross_entropy_loss:
-                        y = onehot(y).to(device)
-                    else:
-                        y = y.long().to(device)
+                if self.loss_fn != cross_entropy_loss:
+                    y = onehot(y)
+                else:
+                    y = y.long()
 
-                    self.put(x, y, self.n_inference_steps)
+                #x = x.to(device)
+                #y = y.to(device)
 
-                    z = self.forward(x)
+                self.put(x, y, self.n_inference_steps)
 
-                    loss:float = self.loss_fn(z, y).item()
-                    lossPerPx = loss/len(x)
+                z = self.forward(x)
 
-                    print("\tloss/px %f" % lossPerPx)
-                    losses.append(loss)
-                    #accs.append(acc)
-                    #epoch_train_accs.append(accs)
+                loss: float = self.loss_fn(y, z).item()
+                lossPerPx = loss / len(x)
+
+                print("\tloss/px %f" % lossPerPx)
+                losses.append(loss)
+                # accs.append(acc)
+                # epoch_train_accs.append(accs)
+
                 if self.store_gradient_angle:
-                    grad_angle = self.compute_gradient_angle(x, y)
-                    #print("grad angle: ", grad_angle)
-                    gradient_angles.append(grad_angle)
+                    gradient_angles.append(self.compute_gradient_angle(x, y))
+
             # if test:
             #     #mean_train_accs.append(np.mean(np.array(epoch_train_accs)))
             #     epoch_test_accs = []
@@ -454,7 +397,6 @@ class Net(object):
             #         #epoch_test_accs.append(test_acc)
             #     #mean_test_accs.append(np.mean(np.array(epoch_test_accs)))
             #     #self.save_model(logdir, savedir, losses, accs, test_accs, gradient_angles, mean_test_accs, mean_train_accs)
-
         return losses
 
 
@@ -490,22 +432,23 @@ class BackpropNet(object):
             l.weights.grad.fill(0)
 
     def train(self, trainset, num_epochs):
-        losses = []
-        #accs = []
-        #test_accs = []
-        #mean_train_accs = []
-        #mean_test_accs = []
-        # begin training loop
+        return self.trainBP(num_epochs, trainset)
 
+    def trainBP(self, num_epochs, trainset):
+        losses = []
+        # accs = []
+        # test_accs = []
+        # mean_train_accs = []
+        # mean_test_accs = []
+        # begin training loop
         lossFn = self.loss_fn
         device = self.device
-
         for n_epoch in range(num_epochs):
             # epoch_train_accs = []
             # print("Beginning epoch ",n_epoch)
-            #acclist = []
+            # acclist = []
             losslist = []
-            #mean_train_accs.append(np.mean(np.array(epoch_train_accs)))
+            # mean_train_accs.append(np.mean(np.array(epoch_train_accs)))
             for n, (x, y) in enumerate(trainset):
                 x = x.to(device)
 
@@ -535,12 +478,12 @@ class BackpropNet(object):
                 # zero grad weights just to be sure
                 # self.zero_grad()
 
-                #acc = accuracy(y, z)
+                # acc = accuracy(y, z)
                 print("%d\tloss/px %f" % (n_epoch, loss / len(z)))
                 losslist.append(loss)
-                #acclist.append(acc)
-                #acclist.append(-L)
-                #epoch_train_accs.append(accs)
+                # acclist.append(acc)
+                # acclist.append(-L)
+                # epoch_train_accs.append(accs)
 
             losses.append(np.mean(np.array(losslist)))
 
@@ -554,8 +497,8 @@ class BackpropNet(object):
             #             test_acc = accuracy(z, labels)
             #             #test_accs.append(test_acc)
             #             epoch_test_accs.append(test_acc)
-            #accs.append(np.mean(np.array(acclist)))
-            #if save:
+            # accs.append(np.mean(np.array(acclist)))
+            # if save:
             #    mean_test_accs.append(np.mean(np.array(epoch_test_accs)))
             #    self.save_model(logdir, savedir, losses, accs, test_accs, mean_test_accs, mean_train_accs)
         return losses
@@ -564,70 +507,68 @@ class BackpropNet(object):
 if __name__ == '__main__':
     global DEVICE
     DEVICE: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     parser = argparse.ArgumentParser()
-    print("Initialized")
-    # parsing arguments
-    parser.add_argument("--logdir", type=str, default="logs")
-    parser.add_argument("--savedir", type=str, default="savedir")
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--norm_factor", type=float, default=1)
-    parser.add_argument("--learning_rate", type=float, default=0.005)
-    parser.add_argument("--inference_learning_rate", type=float, default=0.1)
-    parser.add_argument("--n_inference_steps", type=int, default=200)
-    parser.add_argument("--N_epochs", type=int, default=50)
-    # parser.add_argument("--save_every",type=int, default=1)
-    parser.add_argument("--old_savedir", type=str, default="None")
-    parser.add_argument("--dataset", type=str, default="mnist")
-    parser.add_argument("--use_backwards_weights", type=boolcheck, default=False)
-    parser.add_argument("--update_backwards_weights", type=boolcheck, default=False)
-    parser.add_argument("--use_backward_nonlinearity", type=boolcheck, default=True)
     parser.add_argument("--network_type", type=str, default="ar")
-    parser.add_argument("--store_gradient_angle", type=boolcheck, default=False)
     parser.add_argument("--loss_fn", type=str, default="mse")
 
+    parser.add_argument("--learning_rate", type=float, default=0.01)
+    parser.add_argument("--inference_learning_rate", type=float, default=1)
+    parser.add_argument("--n_inference_steps", type=int, default=1)
+
+    parser.add_argument("--batch_size", type=int, default=16)
+
+    parser.add_argument("--norm_factor", type=float, default=1)
+
+    parser.add_argument("--dataset", type=str, default="mnist")
+    parser.add_argument("--N_epochs", type=int, default=50)
+
+    parser.add_argument("--use_backwards_weights", type=boolcheck, default=False)
+    parser.add_argument("--update_backwards_weights", type=boolcheck, default=False)
+    parser.add_argument("--use_backward_nonlinearity", type=boolcheck, default=False)
+    parser.add_argument("--store_gradient_angle", type=boolcheck, default=False)
+
+    parser.add_argument("--logdir", type=str, default="logs")
+    parser.add_argument("--savedir", type=str, default="savedir")
+
     args = parser.parse_args()
-    print("Args parsed")
+    print(args)
+
     # create folders
-    if args.savedir != "":
-        subprocess.call(["mkdir", "-p", str(args.savedir)])
-    if args.logdir != "":
-        subprocess.call(["mkdir", "-p", str(args.logdir)])
-    print("folders created")
-    loss_fn = None
-    if args.loss_fn != "":
-        loss_fn, loss_fn_deriv = parse_loss_function(args.loss_fn)
+    if args.savedir != "":  subprocess.call(["mkdir", "-p", str(args.savedir)])
+    if args.logdir  != "":  subprocess.call(["mkdir", "-p", str(args.logdir)])
+
+    loss_fn, loss_fn_deriv = loss(args.loss_fn)
+
     trainset, testset = get_dataset(args.batch_size, args.norm_factor, dataset=args.dataset)
+
+    learnRate, infRate = args.learning_rate, args.inference_learning_rate
+
     if args.dataset == "mnist" or args.dataset == "fashion":
-        l1 = FCLayer(784, 300, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
-        l2 = FCLayer(300, 300, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
-        l3 = FCLayer(300, 100, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
+        l1 = FCLayer(784, 300, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
+        l2 = FCLayer(300, 300, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
+        l3 = FCLayer(300, 100, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
         if args.loss_fn == "crossentropy":
             # softmax_deriv?
-            l4 = FCLayer(100, 10, args.batch_size, softmax, linear_deriv, args.inference_learning_rate,
-                         args.learning_rate, device=DEVICE)
+            l4 = FCLayer(100, 10, args.batch_size, softmax, linear_deriv, infRate,learnRate, device=DEVICE)
         else:
-            l4 = FCLayer(100, 10, args.batch_size, linear, linear_deriv, args.inference_learning_rate,
-                         args.learning_rate, device=DEVICE)
+            l4 = FCLayer(100, 10, args.batch_size, linear, linear_deriv, infRate, learnRate, device=DEVICE)
     elif args.dataset == "svhn":
-        l1 = FCLayer(3072, 1000, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
-        l2 = FCLayer(1000, 1000, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
-        l3 = FCLayer(1000, 300, args.batch_size, relu, relu_deriv, args.inference_learning_rate, args.learning_rate,
-                     device=DEVICE)
+        l1 = FCLayer(3072, 1000, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
+        l2 = FCLayer(1000, 1000, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
+        l3 = FCLayer(1000, 300, args.batch_size, relu, relu_deriv, infRate, learnRate, device=DEVICE)
         if args.loss_fn == "crossentropy":
             # softmax_deriv?
-            l4 = FCLayer(100, 10, args.batch_size, softmax, linear_deriv, args.inference_learning_rate,
-                         args.learning_rate, device=DEVICE)
+            l4 = FCLayer(100, 10, args.batch_size, softmax, linear_deriv, infRate,learnRate, device=DEVICE)
         else:
-            l4 = FCLayer(100, 10, args.batch_size, linear, linear_deriv, args.inference_learning_rate,
-                         args.learning_rate, device=DEVICE)
+            l4 = FCLayer(100, 10, args.batch_size, linear, linear_deriv, infRate,learnRate, device=DEVICE)
     else:
         raise ValueError("dataset not recognised")
+
     layers = [l1, l2, l3, l4]
+
+    print(layers)
+
     if args.network_type == "ar":
         net = Net(layers, args.n_inference_steps, use_backwards_weights=args.use_backwards_weights,
                   update_backwards_weights=args.update_backwards_weights,
